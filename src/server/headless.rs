@@ -4184,6 +4184,8 @@ fn is_keybinding_config_diagnostic(diagnostic: &str) -> bool {
 
 /// Run the headless server. This is the entry point called from main.rs.
 pub fn run_server() -> io::Result<()> {
+    crate::platform::initialize_pty_backend()?;
+
     init_logging();
     crate::platform::raise_server_nofile_limit();
 

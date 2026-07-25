@@ -73,6 +73,16 @@ pub fn detach_server_daemon_command(command: &mut std::process::Command) {
     }
 }
 
+#[cfg(windows)]
+pub(crate) fn initialize_pty_backend() -> std::io::Result<()> {
+    configure_pty_backend()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn initialize_pty_backend() -> std::io::Result<()> {
+    Ok(())
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn current_process_is_detached_server_daemon() -> bool {
     unsafe { libc::getsid(0) == libc::getpid() }

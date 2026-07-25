@@ -4,13 +4,16 @@ This file tracks intentional local changes applied on top of the vendored
 `portable-pty` source. Remove a patch only when the upstream crate contains an
 equivalent fix or exposes an option that lets Herdr keep the same behavior.
 
-## 0001 force system ConPTY
+## 0001 configure app-local ConPTY explicitly
 
 status: active
 
-patch: `vendor/patches/portable-pty/0001-force-system-conpty.patch`
+patch: `vendor/patches/portable-pty/0001-configure-app-local-conpty.patch`
 
-herdr issue: https://github.com/ogulcancelik/herdr/issues/761
+herdr issues:
+
+- https://github.com/ogulcancelik/herdr/issues/761
+- https://github.com/ogulcancelik/herdr/issues/1533
 
 upstream discussion: none found
 
@@ -20,16 +23,18 @@ vendored base: `portable-pty 0.9.0`
 
 local files:
 
+- `vendor/portable-pty/src/win/mod.rs`
 - `vendor/portable-pty/src/win/psuedocon.rs`
 
 reason: `portable-pty` intentionally probes a bare `conpty.dll` after verifying
-that `kernel32.dll` exports the ConPTY API. That is useful for WezTerm's bundled
-`OpenConsole.exe` and `conpty.dll` pair, but Herdr does not ship that pair and
-must not load another application's `conpty.dll` from `PATH`.
+that `kernel32.dll` exports the ConPTY API. Herdr must not load another
+application's DLL from `PATH`. Its Windows resolver instead configures the
+absolute DLL path when a matched app-local `conpty.dll`/`OpenConsole.exe` pair
+is present and otherwise retains the system backend.
 
-remove when: upstream `portable-pty` no longer loads bare `conpty.dll` from the
-DLL search path, upstream exposes a way for consumers to force system ConPTY, or
-Herdr replaces the Windows PTY backend.
+remove when: upstream `portable-pty` exposes an explicit absolute-path ConPTY
+configuration API without bare DLL lookup, or Herdr replaces the Windows PTY
+backend.
 
 verification:
 

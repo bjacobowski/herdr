@@ -721,6 +721,8 @@ fn main() -> io::Result<()> {
         return Ok(());
     }
 
+    platform::initialize_pty_backend()?;
+
     // --- Monolithic mode (--no-session escape hatch) ---
     // This is the pre-mission single-process behavior.
 

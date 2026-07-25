@@ -9,8 +9,8 @@ use std::ffi::OsString;
 use std::io::Error as IoError;
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::{mem, ptr};
 use winapi::shared::minwindef::DWORD;
 use winapi::shared::winerror::{HRESULT, S_OK};
@@ -42,7 +42,22 @@ shared_library!(ConPtyFuncs,
     pub fn ClosePseudoConsole(hpc: HPCON),
 );
 
+static APP_LOCAL_CONPTY: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn configure_conpty(path: Option<PathBuf>) -> Result<(), Error> {
+    if let Some(path) = path {
+        APP_LOCAL_CONPTY
+            .set(path)
+            .map_err(|_| Error::msg("ConPTY is already configured"))?;
+    }
+    Ok(())
+}
+
 fn load_conpty() -> ConPtyFuncs {
+    if let Some(path) = APP_LOCAL_CONPTY.get() {
+        return ConPtyFuncs::open(path).expect("failed to load app-local conpty.dll");
+    }
+
     // If the kernel doesn't export these functions then their system is
     // too old and we cannot run.
     let kernel = ConPtyFuncs::open(Path::new("kernel32.dll")).expect(

@@ -40,6 +40,9 @@ use windows_sys::{
 
 use super::{ClipboardImage, ForegroundJob, Signal};
 
+mod conpty;
+pub(crate) use conpty::configure_pty_backend;
+
 const STILL_ACTIVE: u32 = 259;
 const FOREGROUND_PROCESS_SNAPSHOT_CACHE_TTL: Duration = Duration::from_millis(250);
 

@@ -14,6 +14,7 @@ use winapi::um::winbase::INFINITE;
 pub mod conpty;
 mod procthreadattr;
 mod psuedocon;
+pub use psuedocon::configure_conpty;
 
 use filedescriptor::OwnedHandle;
 
