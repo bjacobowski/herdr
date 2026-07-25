@@ -42,37 +42,45 @@ shared_library!(ConPtyFuncs,
     pub fn ClosePseudoConsole(hpc: HPCON),
 );
 
-static APP_LOCAL_CONPTY: OnceLock<PathBuf> = OnceLock::new();
+static CONPTY_SELECTION: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 pub fn configure_conpty(path: Option<PathBuf>) -> Result<(), Error> {
-    if let Some(path) = path {
-        APP_LOCAL_CONPTY
-            .set(path)
-            .map_err(|_| Error::msg("ConPTY is already configured"))?;
-    }
-    Ok(())
+    CONPTY_SELECTION
+        .set(path)
+        .map_err(|_| Error::msg("ConPTY is already configured"))
 }
 
-fn load_conpty() -> ConPtyFuncs {
-    if let Some(path) = APP_LOCAL_CONPTY.get() {
-        return ConPtyFuncs::open(path).expect("failed to load app-local conpty.dll");
+fn load_conpty() -> Result<ConPtyFuncs, String> {
+    let selection = CONPTY_SELECTION
+        .get()
+        .ok_or_else(|| "ConPTY must be configured before opening a Windows PTY".to_string())?;
+    if let Some(path) = selection {
+        return ConPtyFuncs::open(path)
+            .map_err(|err| format!("failed to load app-local ConPTY DLL {}: {err:?}", path.display()));
     }
 
     // If the kernel doesn't export these functions then their system is
     // too old and we cannot run.
-    let kernel = ConPtyFuncs::open(Path::new("kernel32.dll")).expect(
-        "this system does not support conpty.  Windows 10 October 2018 or newer is required",
-    );
-
-    kernel
+    ConPtyFuncs::open(Path::new("kernel32.dll")).map_err(|err| {
+        format!(
+            "this system does not support ConPTY; Windows 10 October 2018 or newer is required: {err:?}"
+        )
+    })
 }
 
 lazy_static! {
-    static ref CONPTY: ConPtyFuncs = load_conpty();
+    static ref CONPTY: Result<ConPtyFuncs, String> = load_conpty();
+}
+
+fn conpty_funcs() -> Result<&'static ConPtyFuncs, Error> {
+    CONPTY
+        .as_ref()
+        .map_err(|message| Error::msg(message.clone()))
 }
 
 pub struct PsuedoCon {
     con: HPCON,
+    funcs: &'static ConPtyFuncs,
 }
 
 unsafe impl Send for PsuedoCon {}
@@ -80,15 +88,16 @@ unsafe impl Sync for PsuedoCon {}
 
 impl Drop for PsuedoCon {
     fn drop(&mut self) {
-        unsafe { (CONPTY.ClosePseudoConsole)(self.con) };
+        unsafe { (self.funcs.ClosePseudoConsole)(self.con) };
     }
 }
 
 impl PsuedoCon {
     pub fn new(size: COORD, input: FileDescriptor, output: FileDescriptor) -> Result<Self, Error> {
+        let funcs = conpty_funcs()?;
         let mut con: HPCON = INVALID_HANDLE_VALUE;
         let result = unsafe {
-            (CONPTY.CreatePseudoConsole)(
+            (funcs.CreatePseudoConsole)(
                 size,
                 input.as_raw_handle() as _,
                 output.as_raw_handle() as _,
@@ -103,11 +112,11 @@ impl PsuedoCon {
             "failed to create psuedo console: HRESULT {}",
             result
         );
-        Ok(Self { con })
+        Ok(Self { con, funcs })
     }
 
     pub fn resize(&self, size: COORD) -> Result<(), Error> {
-        let result = unsafe { (CONPTY.ResizePseudoConsole)(self.con, size) };
+        let result = unsafe { (self.funcs.ResizePseudoConsole)(self.con, size) };
         ensure!(
             result == S_OK,
             "failed to resize console to {}x{}: HRESULT: {}",

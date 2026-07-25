@@ -28,13 +28,14 @@ local files:
 
 reason: `portable-pty` intentionally probes a bare `conpty.dll` after verifying
 that `kernel32.dll` exports the ConPTY API. Herdr must not load another
-application's DLL from `PATH`. Its Windows resolver instead configures the
+application’s DLL from `PATH`. Its Windows resolver instead configures the
 absolute DLL path when a matched app-local `conpty.dll`/`OpenConsole.exe` pair
-is present and otherwise retains the system backend.
+is present and otherwise retains the system backend. Configuration is recorded
+before first use, and DLL load failures propagate through PTY creation.
 
 remove when: upstream `portable-pty` exposes an explicit absolute-path ConPTY
-configuration API without bare DLL lookup, or Herdr replaces the Windows PTY
-backend.
+configuration API without bare DLL lookup and with fallible loading, or Herdr
+replaces the Windows PTY backend.
 
 verification:
 
