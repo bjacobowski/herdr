@@ -7,6 +7,8 @@
 - Relicensed Herdr from AGPL-3.0-or-later to Apache-2.0.
 
 ### Fixed
+- Active workspace and agent rows now use stronger sidebar surfaces, making the current context clearly visible in dark themes.
+- Native Windows console applications now resolve indexed colors through the classic console palette, preserving Far Manager's dark blue and cyan UI inside Herdr.
 - Agent prompts now wait briefly after sending text before pressing Enter, preventing prompts from remaining in agent composers without starting a turn. (#1878)
 - Empty clipboard writes from pane applications no longer erase existing clipboard contents or show a copied confirmation. (#1893)
 - Plain mouse movement no longer triggers continuous full renders while preserving Herdr menu hover and pane application mouse tracking. (#1865)
