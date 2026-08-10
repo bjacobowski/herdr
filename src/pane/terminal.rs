@@ -955,7 +955,7 @@ impl GhosttyPaneTerminal {
                 core.transient_default_color_owner_pgid = None;
             }
 
-            let mut palette = crate::ghostty::default_palette();
+            let mut palette = terminal_base_palette(cfg!(windows));
             for (index, color) in theme.palette.iter().enumerate() {
                 if let Some(color) = color {
                     palette[index] = crate::ghostty::RgbColor {
@@ -1878,6 +1878,7 @@ impl GhosttyPaneTerminal {
                         default_bg,
                         resolved_fg,
                         resolved_bg,
+                        colors.as_ref().map(|colors| &colors.palette),
                     );
                     let symbol = match ghostty_buffer_symbol_into(
                         &cells,
@@ -2147,6 +2148,7 @@ fn ghostty_collect_dirty_patch(
                     default_bg,
                     resolved_fg,
                     resolved_bg,
+                    colors.as_ref().map(|colors| &colors.palette),
                 );
                 let symbol = match ghostty_buffer_symbol_into(
                     &cells,
@@ -2661,11 +2663,12 @@ fn ghostty_cell_style(
     default_bg: Option<Color>,
     resolved_fg: Option<Color>,
     resolved_bg: Option<Color>,
+    palette: Option<&[crate::ghostty::RgbColor; 256]>,
 ) -> Style {
     let mut fg = basic
         .style
         .fg_color
-        .map(ghostty_cell_color)
+        .map(|color| ghostty_cell_color(color, palette, cfg!(windows)))
         .or_else(|| cells.fg_color().ok().flatten().map(ghostty_color))
         .or(default_fg);
     let mut bg = cells
@@ -2673,7 +2676,7 @@ fn ghostty_cell_style(
         .ok()
         .flatten()
         .or(basic.style.bg_color)
-        .map(ghostty_cell_color)
+        .map(|color| ghostty_cell_color(color, palette, cfg!(windows)))
         .or_else(|| cells.bg_color().ok().flatten().map(ghostty_color))
         .or(default_bg);
     if basic.style.invisible {
@@ -2695,7 +2698,11 @@ fn ghostty_cell_style(
     }
 
     let mut style = ghostty_default_style(fg, bg);
-    if let Some(underline_color) = basic.style.underline_color.map(ghostty_cell_color) {
+    if let Some(underline_color) = basic
+        .style
+        .underline_color
+        .map(|color| ghostty_cell_color(color, palette, cfg!(windows)))
+    {
         style = style.underline_color(underline_color);
     }
     let mut modifiers = Modifier::empty();
@@ -2928,8 +2935,45 @@ fn terminal_theme_color(color: crate::ghostty::RgbColor) -> crate::terminal_them
     }
 }
 
-fn ghostty_cell_color(color: crate::ghostty::CellColor) -> Color {
+fn terminal_base_palette(windows: bool) -> [crate::ghostty::RgbColor; 256] {
+    let mut palette = crate::ghostty::default_palette();
+    if windows {
+        // ConPTY translates legacy console attributes to palette indices. Resolve those
+        // against the classic console table instead of the unrelated outer terminal theme.
+        const WINDOWS_CONSOLE_COLORS: [(u8, u8, u8); 16] = [
+            (0x00, 0x00, 0x00),
+            (0x80, 0x00, 0x00),
+            (0x00, 0x80, 0x00),
+            (0x80, 0x80, 0x00),
+            (0x00, 0x00, 0x80),
+            (0x80, 0x00, 0x80),
+            (0x00, 0x80, 0x80),
+            (0xc0, 0xc0, 0xc0),
+            (0x80, 0x80, 0x80),
+            (0xff, 0x00, 0x00),
+            (0x00, 0xff, 0x00),
+            (0xff, 0xff, 0x00),
+            (0x00, 0x00, 0xff),
+            (0xff, 0x00, 0xff),
+            (0x00, 0xff, 0xff),
+            (0xff, 0xff, 0xff),
+        ];
+        for (entry, (r, g, b)) in palette.iter_mut().zip(WINDOWS_CONSOLE_COLORS) {
+            *entry = crate::ghostty::RgbColor { r, g, b };
+        }
+    }
+    palette
+}
+
+fn ghostty_cell_color(
+    color: crate::ghostty::CellColor,
+    palette: Option<&[crate::ghostty::RgbColor; 256]>,
+    resolve_palette: bool,
+) -> Color {
     match color {
+        crate::ghostty::CellColor::Palette(index) if resolve_palette => palette
+            .map(|palette| ghostty_color(palette[usize::from(index)]))
+            .unwrap_or(Color::Indexed(index)),
         crate::ghostty::CellColor::Palette(index) => Color::Indexed(index),
         crate::ghostty::CellColor::Rgb(color) => ghostty_color(color),
     }
@@ -4789,10 +4833,11 @@ mod tests {
     }
 
     #[test]
-    fn render_preserves_palette_colors_instead_of_flattening_to_rgb() {
+    fn render_preserves_palette_colors_on_unix_and_resolves_them_on_windows() {
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
         let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        pane.apply_host_terminal_theme(crate::terminal_theme::TerminalTheme::default());
         {
             let mut core = pane.core.lock().unwrap();
             core.terminal.write(
@@ -4806,15 +4851,45 @@ mod tests {
             .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
             .unwrap();
 
+        let palette = terminal_base_palette(cfg!(windows));
+        let expected_palette_color = |index: u8| {
+            if cfg!(windows) {
+                Some(ghostty_color(palette[usize::from(index)]))
+            } else {
+                Some(Color::Indexed(index))
+            }
+        };
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].symbol(), "R");
-        assert_eq!(buffer[(0, 0)].style().fg, Some(Color::Indexed(1)));
+        assert_eq!(buffer[(0, 0)].style().fg, expected_palette_color(1));
         assert_eq!(buffer[(2, 0)].symbol(), "I");
-        assert_eq!(buffer[(2, 0)].style().fg, Some(Color::Indexed(171)));
+        assert_eq!(buffer[(2, 0)].style().fg, expected_palette_color(171));
         assert_eq!(buffer[(4, 0)].symbol(), "B");
-        assert_eq!(buffer[(4, 0)].style().bg, Some(Color::Indexed(4)));
+        assert_eq!(buffer[(4, 0)].style().bg, expected_palette_color(4));
         assert_eq!(buffer[(6, 0)].symbol(), "T");
         assert_eq!(buffer[(6, 0)].style().fg, Some(Color::Rgb(1, 2, 3)));
+    }
+
+    #[test]
+    fn windows_palette_resolution_uses_legacy_console_colors_for_far() {
+        let palette = terminal_base_palette(true);
+
+        assert_eq!(
+            ghostty_cell_color(crate::ghostty::CellColor::Palette(4), Some(&palette), true),
+            Color::Rgb(0x00, 0x00, 0x80)
+        );
+        assert_eq!(
+            ghostty_cell_color(crate::ghostty::CellColor::Palette(14), Some(&palette), true),
+            Color::Rgb(0x00, 0xff, 0xff)
+        );
+        assert_eq!(
+            ghostty_cell_color(
+                crate::ghostty::CellColor::Palette(171),
+                Some(&palette),
+                true,
+            ),
+            ghostty_color(crate::ghostty::default_palette()[171])
+        );
     }
 
     #[test]
@@ -4834,9 +4909,14 @@ mod tests {
             .unwrap();
 
         let buffer = terminal.backend().buffer();
+        let expected = if cfg!(windows) {
+            Some(ghostty_color(crate::ghostty::default_palette()[4]))
+        } else {
+            Some(Color::Indexed(4))
+        };
         for x in 0..20 {
             assert_eq!(buffer[(x, 0)].symbol(), " ");
-            assert_eq!(buffer[(x, 0)].style().bg, Some(Color::Indexed(4)));
+            assert_eq!(buffer[(x, 0)].style().bg, expected);
         }
     }
 
@@ -5378,7 +5458,6 @@ mod tests {
         let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
         let pane = GhosttyPaneTerminal::new(terminal, tx.clone()).unwrap();
         let pane_id = PaneId::from_raw(1);
-        let color = current_palette_color(&pane, 0);
         pane.apply_host_terminal_theme(crate::terminal_theme::TerminalTheme {
             foreground: None,
             background: Some(crate::terminal_theme::RgbColor {
@@ -5388,6 +5467,7 @@ mod tests {
             }),
             ..Default::default()
         });
+        let color = current_palette_color(&pane, 0);
 
         let result = pane.process_pty_bytes(pane_id, 0, b"\x1b]4;0;?\x07\x1b]11;?\x07\x1b[c", &tx);
 
