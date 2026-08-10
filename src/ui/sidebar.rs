@@ -792,16 +792,16 @@ pub(super) fn render_sidebar_collapsed(app: &AppState, frame: &mut Frame, area: 
         let is_selected = visible_idx == app.selected && is_navigating;
         let is_active = Some(visible_idx) == app.active;
         let row_style = if is_selected {
-            Style::default().bg(p.surface0)
+            Style::default().bg(p.surface1)
         } else if is_active {
-            Style::default().bg(p.surface_dim)
+            Style::default().bg(p.surface0)
         } else {
             Style::default()
         };
         let num_style = if is_selected {
-            Style::default().fg(p.overlay1).bg(p.surface0)
+            Style::default().fg(p.overlay1).bg(p.surface1)
         } else if is_active {
-            Style::default().fg(p.text).bg(p.surface_dim)
+            Style::default().fg(p.text).bg(p.surface0)
         } else {
             Style::default().fg(p.overlay0)
         };
@@ -1235,12 +1235,10 @@ fn render_workspace_list(
         let (agg_state, agg_seen) = ws.aggregate_state(&app.terminals);
 
         if highlighted {
-            let bg = if selected {
-                p.surface0
-            } else if is_dragged {
+            let bg = if selected || is_dragged {
                 p.surface1
             } else {
-                p.surface_dim
+                p.surface0
             };
             let buf = frame.buffer_mut();
             for y in row_y..row_y + row_height {
@@ -1481,7 +1479,7 @@ fn render_agent_detail(
 
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
         let row_style = if is_active {
-            Style::default().bg(p.surface_dim)
+            Style::default().bg(p.surface0)
         } else {
             Style::default()
         };
@@ -1634,14 +1632,14 @@ mod tests {
         assert_eq!(workspace_style.fg, Some(app.palette.text));
         assert!(workspace_style.add_modifier.contains(Modifier::BOLD));
         assert!(!workspace_style.add_modifier.contains(Modifier::DIM));
-        assert_eq!(workspace_style.bg, Some(app.palette.surface_dim));
+        assert_eq!(workspace_style.bg, Some(app.palette.surface0));
 
         let agent_x = find_symbol_x(buffer, body.y + 1, body.width, "p");
         let agent_style = buffer[(agent_x, body.y + 1)].style();
         assert_eq!(agent_style.fg, Some(app.palette.overlay0));
         assert!(agent_style.add_modifier.contains(Modifier::DIM));
         assert!(!agent_style.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(agent_style.bg, Some(app.palette.surface_dim));
+        assert_eq!(agent_style.bg, Some(app.palette.surface0));
     }
 
     #[test]
@@ -1702,7 +1700,7 @@ rows = [[{ token = "workspace", bold = false }, { token = "agent", dim = false }
         assert_eq!(active.fg, Some(app.palette.text));
         assert!(active.add_modifier.contains(Modifier::BOLD));
         assert!(!active.add_modifier.contains(Modifier::DIM));
-        assert_eq!(active.bg, Some(app.palette.surface_dim));
+        assert_eq!(active.bg, Some(app.palette.surface0));
 
         let inactive = buffer[(find_symbol_x(buffer, second_row, 25, "t"), second_row)].style();
         assert_eq!(inactive.fg, Some(app.palette.subtext0));
@@ -1710,6 +1708,37 @@ rows = [[{ token = "workspace", bold = false }, { token = "agent", dim = false }
             .add_modifier
             .intersects(Modifier::BOLD | Modifier::DIM));
         assert_eq!(inactive.bg, Some(ratatui::style::Color::Reset));
+    }
+
+    #[test]
+    fn navigate_selection_is_stronger_than_active_workspace() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.active = Some(0);
+        app.selected = 1;
+        app.mode = Mode::Navigate;
+        let area = Rect::new(0, 0, 26, 20);
+        app.view.workspace_card_areas = compute_workspace_card_areas(&app, area);
+        let active_row = app.view.workspace_card_areas[0].rect.y;
+        let selected_row = app.view.workspace_card_areas[1].rect.y;
+        let mut terminal = Terminal::new(TestBackend::new(26, 20)).unwrap();
+        terminal
+            .draw(|frame| render_sidebar(&app, &TerminalRuntimeRegistry::new(), frame, area))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(
+            buffer[(find_symbol_x(buffer, active_row, 25, "o"), active_row)]
+                .style()
+                .bg,
+            Some(app.palette.surface0)
+        );
+        assert_eq!(
+            buffer[(find_symbol_x(buffer, selected_row, 25, "t"), selected_row)]
+                .style()
+                .bg,
+            Some(app.palette.surface1)
+        );
     }
 
     #[test]
@@ -1748,12 +1777,12 @@ rows = [[{ token = "$hype", fg = "#abcdef", bold = true, dim = false }, "workspa
             assert_eq!(style.fg, Some(ratatui::style::Color::Rgb(0xab, 0xcd, 0xef)));
             assert!(style.add_modifier.contains(Modifier::BOLD));
             assert!(!style.add_modifier.contains(Modifier::DIM));
-            assert_eq!(style.bg, Some(app.palette.surface_dim));
+            assert_eq!(style.bg, Some(app.palette.surface0));
         }
         assert_eq!(separator.fg, Some(app.palette.overlay0));
         assert!(separator.add_modifier.contains(Modifier::DIM));
         assert!(!separator.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(separator.bg, Some(app.palette.surface_dim));
+        assert_eq!(separator.bg, Some(app.palette.surface0));
     }
 
     #[test]
